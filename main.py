@@ -2,63 +2,65 @@ import os
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Railway ရဲ့ Variables ထဲမှာ TELEGRAM_TOKEN ဆိုတဲ့နာမည်နဲ့ Token ထည့်ထားပေးရပါမယ်
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = "8639241153:AAGcL6T6bgJ1QdccyVb4fuLxq2qgTIm3wIo"
 
-# Keyboard ခလုတ်များကို ပုံစံချခြင်း
-main_keyboard = [
-    ['💰 Balance', '📝 Task'],
-    ['👥 Referral', '⚙️ Set Wallet'],
-    ['💳 Withdrawal'],
-    ['🛠 Admin Panel']
-]
-markup = ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True)
+# Admin ID များကို စာရင်းလုပ်ထားခြင်း
+ADMIN_LIST = [7097694897, 7311138952]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # User /start နှိပ်လိုက်ရင် ပေါ်လာမယ့်စာ
+    user_id = update.message.from_user.id
+    
+    # ရိုးရိုး User များအတွက် ခလုတ်များ
+    buttons = [
+        ['💰 Balance', '📝 Task'],
+        ['👥 Referral', '⚙️ Set Wallet'],
+        ['💳 Withdrawal']
+    ]
+    
+    # အကယ်၍ Admin List ထဲမှာပါတဲ့ ID ဆိုရင် Admin Panel ခလုတ်ကို ပေါင်းထည့်ပေးမည်
+    if user_id in ADMIN_LIST:
+        buttons.append(['🛠 Admin Panel'])
+        
+    markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    
     await update.message.reply_text(
-        "Welcome to Axel Money Bot! 🌟\n\nအောက်က ခလုတ်များကို အသုံးပြုပြီး point များ စုဆောင်းနိုင်ပါသည်။",
+        f"Welcome {update.message.from_user.first_name}! 🌟\nAxel Money Bot မှ ကြိုဆိုပါတယ်။ အောက်က ခလုတ်များကို အသုံးပြုပြီး point များ စုဆောင်းနိုင်ပါသည်။",
         reply_markup=markup
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
     user_id = update.message.from_user.id
-
-    # ခလုတ်တစ်ခုချင်းစီအတွက် အလုပ်လုပ်ပုံ (Logic)
-    if text == "💰 Balance":
-        await update.message.reply_text(f"👤 User ID: {user_id}\n💰 လက်ရှိ Balance: 0.00 Point")
+    text = update.message.text
     
+    # Admin Panel ကို Admin သာ နှိပ်ခွင့်ရှိစေရန် စစ်ဆေးခြင်း
+    if text == "🛠 Admin Panel":
+        if user_id in ADMIN_LIST:
+            await update.message.reply_text("✅ Admin Dashboard ကို ရောက်ရှိနေပါသည်။\n(User list ကြည့်ရန် နှင့် Point ပေးရန် လုပ်ဆောင်ချက်များ ထည့်သွင်းနိုင်သည်)")
+        else:
+            # ခလုတ် မမြင်ရသော်လည်း စာရိုက်ပို့လာပါက အကြောင်းပြန်ရန်
+            await update.message.reply_text("⚠️ သင်သည် Admin မဟုတ်သဖြင့် ဤနေရာကို ဝင်ရောက်ခွင့်မရှိပါ။")
+            
+    elif text == "💰 Balance":
+        await update.message.reply_text("💰 သင်၏ လက်ရှိ Balance မှာ 0.00 ဖြစ်ပါသည်။")
+        
     elif text == "📝 Task":
         await update.message.reply_text("🎯 ယနေ့အတွက် Task အသစ်များ မရှိသေးပါ။")
-    
+        
     elif text == "👥 Referral":
-        bot_username = (await context.bot.get_me()).username
-        ref_link = f"https://t.me/{bot_username}?start={user_id}"
-        await update.message.reply_text(f"🔗 သင်၏ Referral Link:\n{ref_link}\n\nသူငယ်ချင်းတစ်ယောက်ခေါ်လျှင် 100 Point ရပါမည်။")
-    
+        await update.message.reply_text("🔗 သင့်သူငယ်ချင်းများကို ဖိတ်ခေါ်ရန် Link ကို မကြာမီ ရရှိပါမည်။")
+
     elif text == "💳 Withdrawal":
-        await update.message.reply_text("⚠️ နည်းပညာပိုင်းဆိုင်ရာ ပြုပြင်နေသဖြင့် ငွေထုတ်ယူမှုကို ခေတ္တရပ်ဆိုင်းထားပါသည်။ Admin ထံ တိုက်ရိုက်ဆက်သွယ်ပါ။")
-    
-    elif text == "⚙️ Set Wallet":
-        await update.message.reply_text("ပို့ဆောင်လိုသည့် Wallet Address (TON/Solana) ကို ပို့ပေးပါ။")
-    
-    else:
-        await update.message.reply_text("ကျေးဇူးပြု၍ အောက်က ခလုတ်များကို အသုံးပြုပါ။", reply_markup=markup)
+        await update.message.reply_text("⚠️ ငွေထုတ်ရန် အနည်းဆုံး point 10.00 လိုအပ်ပါသည်။")
 
 def main():
-    if not TOKEN:
-        print("Error: TELEGRAM_TOKEN variables ထဲမှာ မရှိသေးပါ!")
-        return
-
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("Bot is starting on Railway...")
+    print("Bot is running...")
     app.run_polling()
 
 if __name__ == '__main__':
     main()
-                                        
+    

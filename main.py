@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # --- CONFIG ---
 TOKEN = os.getenv("8639241153:AAGcL6T6bgJ1QdccyVb4fuLxq2qgTIm3wIo")
 MONGO_URI = "mongodb+srv://hein:heinhein2007@cluster0.ehhc6my.mongodb.net/"
+
 ADMIN_LIST = [int(id) for id in os.getenv("7311138952", "7097694897").split(",") if id]
 
 client = pymongo.MongoClient(MONGO_URI)

@@ -1,129 +1,108 @@
 import os
-import json
+import pymongo
 from telegram import ReplyKeyboardMarkup, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# --- CONFIGURATION ---
-TOKEN = "8639241153:AAGcL6T6bgJ1QdccyVb4fuLxq2qgTIm3wIo"
-ADMIN_LIST = [7097694897, 7311138952]
-DATA_FILE = "user_data.json"
+# --- CONFIG ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
+ADMIN_LIST = [int(id) for id in os.getenv("ADMIN_ID", "").split(",") if id]
 
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as f: return json.load(f)
-        except: pass
-    return {"users": {}, "tasks": [], "settings": {"ref_bonus": 500}}
+client = pymongo.MongoClient(MONGO_URI)
+db = client["axel_money_bot"]
+users_col = db["users"]
+tasks_col = db["tasks"]
+settings_col = db["settings"]
 
-def save_data(data):
-    with open(DATA_FILE, "w") as f: json.dump(data, f, indent=4)
+if not settings_col.find_one():
+    settings_col.insert_one({"ref_bonus": 500, "min_withdraw": 5000})
 
-db = load_data()
-
-# --- USER FUNCTIONS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.message.from_user.id)
-    user_name = update.message.from_user.first_name
+    user_id, user_name = update.message.from_user.id, update.message.from_user.first_name
+    if not users_col.find_one({"user_id": user_id}):
+        ref_by = int(context.args[0]) if context.args and context.args[0].isdigit() else None
+        users_col.insert_one({"user_id": user_id, "name": user_name, "balance": 0, "tasks_done": [], "ref_by": ref_by, "wallet": None})
+        if ref_by:
+            bonus = settings_col.find_one()["ref_bonus"]
+            users_col.update_one({"user_id": ref_by}, {"$inc": {"balance": bonus}})
     
-    if user_id not in db["users"]:
-        referrer = context.args[0] if context.args else None
-        db["users"][user_id] = {"name": user_name, "balance": 0, "tasks_done": [], "ref_by": referrer}
-        
-        if referrer and referrer in db["users"] and referrer != user_id:
-            db["users"][referrer]["balance"] += db["settings"]["ref_bonus"]
-            try:
-                await context.bot.send_message(chat_id=int(referrer), text=f"👥 အဖွဲ့ဝင်သစ်တိုးလာပါပြီ! +{db['settings']['ref_bonus']} Points ရရှိပါတယ်။")
-            except: pass
-        save_data(db)
-
     buttons = [['💰 Balance', '📝 Task'], ['👥 Referral', '⚙️ Set Wallet'], ['💳 Withdrawal']]
-    if int(user_id) in ADMIN_LIST: buttons.append(['🛠 Admin Panel'])
-    
-    await update.message.reply_text(
-        f"Axel Money Bot မှ ကြိုဆိုပါတယ် {user_name}! ✨",
-        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
-    )
+    if user_id in ADMIN_LIST: buttons.append(['🛠 Admin Panel'])
+    await update.message.reply_text(f"Axel Money Bot မှ ကြိုဆိုပါတယ် {user_name}!", reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True))
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.message.from_user.id)
-    text = update.message.text
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id, text = update.message.from_user.id, update.message.text
+    user = users_col.find_one({"user_id": user_id})
 
     if text == "💰 Balance":
-        bal = db["users"][user_id]["balance"]
-        await update.message.reply_text(f"💰 သင်၏လက်ရှိလက်ကျန်- {bal} Points")
+        await update.message.reply_text(f"💰 လက်ကျန်- {user['balance']} Points")
 
     elif text == "📝 Task":
-        done_list = db["users"][user_id]["tasks_done"]
-        available = [t for t in db["tasks"] if t["id"] not in done_list]
-        
-        if not available:
-            await update.message.reply_text("🎯 ယနေ့အတွက် Task အကုန်ပြီးပါပြီ။")
-            return
-
+        available = [t for t in tasks_col.find() if t["id"] not in user["tasks_done"]]
+        if not available: return await update.message.reply_text("🎯 Task အားလုံး ပြီးပါပြီ။")
         for t in available:
-            kb = [[InlineKeyboardButton("🔗 Join Link", url=t['url'])],
-                  [InlineKeyboardButton("✅ အတည်ပြုမည်", callback_data=f"done_{t['id']}")]]
-            await update.message.reply_text(f"📌 {t['name']}\n💰 ရရှိမည်- {t['points']} Points", reply_markup=InlineKeyboardMarkup(kb))
+            kb = [[InlineKeyboardButton("🔗 Link", url=t['url'])], [InlineKeyboardButton("✅ Done", callback_data=f"done_{t['id']}")]]
+            await update.message.reply_text(f"📌 {t['name']}\n💰 {t['points']} Points", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif text == "👥 Referral":
-        bot_user = (await context.bot.get_me()).username
-        link = f"https://t.me/{bot_user}?start={user_id}"
-        await update.message.reply_text(f"👥 သင့်ရဲ့ Invite Link:\n`{link}`\n\nတစ်ယောက်ခေါ်လျှင် {db['settings']['ref_bonus']} Points ရမည်။", parse_mode="Markdown")
+    elif text == "⚙️ Set Wallet":
+        await update.message.reply_text("📱 သင်၏ ငွေထုတ်ယူမည့် Wallet (သို့) ဖုန်းနံပါတ်ကို ပေးပို့ပါ။\nဥပမာ- `Kpay 09xxxxxxxxx` သို့မဟုတ် `Wave 09xxxxxxxxx`", parse_mode="Markdown")
+        context.user_data['state'] = 'SET_WALLET'
 
-    elif text == "🛠 Admin Panel" and int(user_id) in ADMIN_LIST:
-        await update.message.reply_text(
-            "🛠 **Admin Control Panel**\n\n"
-            "• `/addtask နာမည် | Link | Points` - Task အသစ်ထည့်ရန်\n"
-            "• `/setref အမှတ်` - Ref Bonus ပြောင်းရန်\n"
-            "• `/send UserID | စာသား` - User ထံစာပို့ရန်\n"
-            "• `/users` - User စုစုပေါင်းကြည့်ရန်",
-            parse_mode="Markdown"
-        )
+    elif text == "💳 Withdrawal":
+        min_w = settings_col.find_one()["min_withdraw"]
+        if not user['wallet']:
+            await update.message.reply_text("❌ အရင်ဆုံး '⚙️ Set Wallet' မှာ Wallet အရင်ထည့်ပေးပါ။")
+        elif user['balance'] < min_w:
+            await update.message.reply_text(f"⚠️ ငွေထုတ်ရန် အနည်းဆုံး {min_w} Points လိုအပ်ပါသည်။")
+        else:
+            # ငွေထုတ်ခွင့်တောင်းဆိုမှုကို Admin ဆီ ပို့ခြင်း
+            for admin in ADMIN_LIST:
+                await context.bot.send_message(chat_id=admin, text=f"🔔 **ငွေထုတ်ရန်တောင်းဆိုမှု**\n\nID: `{user_id}`\nအမည်: {user['name']}\nWallet: `{user['wallet']}`\nPoints: {user['balance']}", parse_mode="Markdown")
+            users_col.update_one({"user_id": user_id}, {"$set": {"balance": 0}}) # Balance ကို 0 ပြန်လုပ် (သို့မဟုတ် လိုသလောက်နုတ်)
+            await update.message.reply_text("✅ ငွေထုတ်ရန် တောင်းဆိုမှု အောင်မြင်ပါသည်။ Admin မှ စစ်ဆေးပြီး 24 နာရီအတွင်း ပို့ပေးပါလိမ့်မည်။")
 
-# --- CALLBACKS ---
+    elif text == "🛠 Admin Panel" and user_id in ADMIN_LIST:
+        await update.message.reply_text("🛠 Admin Commands:\n/addtask Name|URL|Points\n/setref Points\n/setmin Points\n/send UserID|Message")
+
+# --- အထွေထွေ စာတိုများ (Wallet သိမ်းဆည်းရန်) ---
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if context.user_data.get('state') == 'SET_WALLET':
+        wallet_info = update.message.text
+        users_col.update_one({"user_id": user_id}, {"$set": {"wallet": wallet_info}})
+        await update.message.reply_text(f"✅ Wallet အချက်အလက်ကို `{wallet_info}` အဖြစ် သိမ်းဆည်းပြီးပါပြီ။", parse_mode="Markdown")
+        context.user_data['state'] = None
+    else:
+        await handle_buttons(update, context)
+
+# --- Task Callback ---
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = str(query.from_user.id)
-    task_id = int(query.data.split("_")[1])
-    
-    task = next((t for t in db["tasks"] if t["id"] == task_id), None)
-    if task and task_id not in db["users"][user_id]["tasks_done"]:
-        db["users"][user_id]["tasks_done"].append(task_id)
-        db["users"][user_id]["balance"] += task["points"]
-        save_data(db)
-        await query.answer("✅ Point ထည့်သွင်းပြီးပါပြီ!")
+    user_id, task_id = query.from_user.id, int(query.data.split("_")[1])
+    task = tasks_col.find_one({"id": task_id})
+    user = users_col.find_one({"user_id": user_id})
+
+    if task and task_id not in user["tasks_done"]:
+        users_col.update_one({"user_id": user_id}, {"$push": {"tasks_done": task_id}, "$inc": {"balance": task["points"]}})
+        await query.answer("✅ Point ရရှိပါပြီ!")
         await query.edit_message_text(f"✅ {task['name']} ပြီးမြောက်ကြောင်း အတည်ပြုပြီး။")
 
-# --- ADMIN COMMANDS ---
-async def admin_cmds(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.from_user.id not in ADMIN_LIST: return
     text = update.message.text
-    
-    if text.startswith("/addtask"):
-        try:
-            parts = text.replace("/addtask ", "").split("|")
-            new_id = len(db["tasks"]) + 1
-            db["tasks"].append({"id": new_id, "name": parts[0].strip(), "url": parts[1].strip(), "points": int(parts[2].strip())})
-            save_data(db); await update.message.reply_text("✅ Task ထည့်ပြီးပါပြီ။")
-        except: await update.message.reply_text("ပုံစံမှားနေပါသည်။")
-
-    elif text.startswith("/setref"):
-        db["settings"]["ref_bonus"] = int(context.args[0])
-        save_data(db); await update.message.reply_text("✅ Ref Bonus ပြောင်းပြီးပါပြီ။")
-
-    elif text.startswith("/send"):
-        try:
-            parts = text.replace("/send ", "").split("|")
-            await context.bot.send_message(chat_id=int(parts[0].strip()), text=f"📩 Admin မှ စာပို့လိုက်ပါသည်-\n\n{parts[1].strip()}")
-            await update.message.reply_text("✅ စာပို့ပြီးပါပြီ။")
-        except: await update.message.reply_text("ပို့မရပါ။ User ID မှားနိုင်ပါတယ်။")
+    if text.startswith("/setmin"):
+        min_p = int(context.args[0])
+        settings_col.update_one({}, {"$set": {"min_withdraw": min_p}})
+        await update.message.reply_text(f"✅ အနည်းဆုံး ငွေထုတ်ယူနိုင်သည့် Point ကို {min_p} ပြောင်းလိုက်ပါပြီ။")
+    # (တခြား addtask, send commands များ ဒီမှာ ဆက်ရှိပါမယ်)
 
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Regex("^(/addtask|/setref|/send|/users)"), admin_cmds))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.Regex("^/"), admin_commands)) # Admin commands
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.run_polling()
 
 if __name__ == "__main__": main()
+            

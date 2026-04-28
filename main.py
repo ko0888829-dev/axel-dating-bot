@@ -4,9 +4,9 @@ from telegram import ReplyKeyboardMarkup, Update, InlineKeyboardButton, InlineKe
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # --- CONFIG ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-MONGO_URI = os.getenv("MONGO_URI")
-ADMIN_LIST = [int(id) for id in os.getenv("ADMIN_ID", "").split(",") if id]
+TOKEN = os.getenv("8639241153:AAGcL6T6bgJ1QdccyVb4fuLxq2qgTIm3wIo")
+MONGO_URI = os.getenv("mongodb+srv://hein:heinhein2007@cluster0.ehhc6my.mongodb.net/?appName=Cluster0")
+ADMIN_LIST = [int(id) for id in os.getenv("7311138952", "7097694897").split(",") if id]
 
 client = pymongo.MongoClient(MONGO_URI)
 db = client["axel_money_bot"]
